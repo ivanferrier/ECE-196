@@ -6,7 +6,9 @@ void setup() {
 
 // the loop routine runs over and over again forever:
 void loop() {
-Serial.print(1);
+Serial.print(millis());
+//Serial.print(" ");
+//Serial.print(millis());
 Serial.print(" ");
 Serial.println(millis());
 delay(100);

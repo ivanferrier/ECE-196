@@ -1,0 +1,157 @@
+# ==================== Imports ====================
+import bge   # should be imported for all blender game modules
+import math
+import serial       # will be important to our project
+import numpy as np  # mainly used to translate degrees to radians
+print("running program")
+
+########## Set Global Parameters ##################
+global ser    
+global sholdRun
+
+                                                                # opens the serial port. Is a global parameter rather than defined insied of 
+                                                                # function so that we dont get the lag of reopening the serial port each time
+ser = serial.Serial(port="COM11", baudrate=9600, timeout=1)
+shouldRun = 1                                                   # now that we are no longer using the with call of the serial, it is important to make
+                                                                # sure that the serial port gets closed before we exit bge each time
+                                                                # that is why we add the serial close function
+
+
+print("serial port opened")
+print("\n\npress Q to exit the Blender Game Engine") # rather than Esc which will not close the serial port
+
+# these variables are used to move the "cursor" in any direction by recording the direction of movement
+global locationTemp 
+global locationDifference
+
+locationTemp = [0,0,0]
+locationDifference = [0,0,0]
+
+global b2Array
+
+b2Array = [0,0]         # short term memory for button 2
+
+scene = bge.logic.getCurrentScene()
+objects = scene.objects                     # these objects are all active
+objectsInactive = scene.objectsInactive     # allows us to get objects that are in the inactive layer where the cube that we add lives
+
+# the list that this prints is the list that can be modified in the active and inactive objects
+print("inactiveObjects", objectsInactive)
+print("activeObjects", objects) 
+
+
+
+
+
+        # this form of rotation was the only method that I could find to set the rotation to a value rather than adding a rotation like applyRotation()
+        # using this method allows us to set an objects rotation to the potentiometers value directally rather than  building a short term memory for each
+        # potentiometer anc then cheking for a change in rotation  and adding that given rotation to each object. 
+        # is also usefull because localOrientatino captures parental rotation, so it is possible to mitigate rotational calculations based on parental roles
+
+def rotate(pval, obj, axis, ofset = 0, scale = 1):
+    xyz = objects[obj].localOrientation.to_euler()      # we need to get so that we can copy the unchanged rotation axes
+    pval = pval*scale                                   # changes the scale for different call methods, we could also just multiply pval by the scale factor but it seemed a little easier to read this way
+    xyz[axis] = math.radians(pval*180/1023-90 + ofset)  # sets the given axis to the potentiometer value. We divide by 1023 because that is the max of a potentiometer 
+    objects[obj].localOrientation = xyz.to_matrix()     # now that we have edited the rotation, we can set it again by putting it back to matrix form
+    
+
+def function(cont):         # is the main function of the code and is run with an always script with logic bricks. It will be called every frame
+    if(shouldRun == 1):         # keeps the loop from running once the serial port is closed
+        global locationTemp 
+        global locationDifference
+                    # we only need to define the global values that we update. Since we don't update ser or shouldRun we dont have to call them as global in this scope, but they will still read as global values
+        
+        own = cont.owner        # blender game engine code that allows this python module to update the actuators conected to the object with this code attached to it
+
+        i = 0
+        while(i<1):         #search untill we get data we can work with before updating the scene
+            
+            data = ser.readline().strip().decode('utf-8') 
+                                            # spliting the data by a " " will seperate the data that is sent from the arduino. If the data is seperated with a 
+                                            # tab, " " should be changed to "\t". It doesnt really matter what it is split with, as long as it is consistant on 
+                                            # both the Arduino and here in Blender. 
+                                            
+                                            # once we have the data and it is split, if it is printed to the System Console, it will not be a string, 
+                                            # decoding it with utf-8 will make it a string
+            
+            length = len(data.split(" "))   #Sometimes serial communication messes up, especially when it is first started up 
+                                            #so we check to make sure we are getting what we want before we continue. This is 
+                                            #important so that we dont crash the system
+            
+            if(length == 11):
+                poten = data.split(" ")     # splits the data by the " " char
+                for i in range(len(poten)) # turns each of the string representations into int
+                    poten[i] = int(poten[i])
+                p0, p1, p2, p3, p4, p5,p6,p7,p8, b1, b2 = poten  # set the data as it was sent to the serial
+                
+                b2Array[0] = b2Array[1]     # serves as a small working memory, Allows us to check change in state of the button
+                b2Array[1] = b2
+                
+                
+                # rotate(Value, Object, axis, ofset, scale)      0 = X axis, 1 = Y axis 2 = Z axis 
+                rotate(p0,"Base",2)             # rotates the base cube on the Z axis   the values of "Base" should be optimised before moving to the next block and then that one before the next and so on 
+                rotate(p1,"Cube.001",1,ofset = -35)
+                rotate(p2,"Cube.001",0,ofset = 30, scale = 1)
+                rotate(p3,"Cube.002",2,ofset = 180)
+                rotate(p4,"Cube.003",2,ofset = 90, scale = -2)
+                rotate(p5,"Cube.004",0,ofset = 160, scale = -1.8)
+                rotate(p6,"canvase",2, scale = -2)
+                rotate(p7,"canvase",1, ofset = 55, scale = .5)
+                canvase = objects["canvase"]
+                pen = objects["Cube.005"]
+ 
+ 
+                objectsInactive["Cube.006"].worldScale = (p8/1023*5, p8/1023*5, p8/1023*5) # scalse the cube that we import form inactive 
+                
+                
+                # activates and deactivates the add actuator of this cube. This actuator sends a message to Cube.005 to add a new Cube.006 form inactive        
+                if(b1): 
+                    cont.activate("add")
+                    cont.deactivate("add")
+                    # overall it makes it so that when button one is pressed it will trace the position of Cube.005
+                    
+                # Stores a temportary location when the button is first pressed
+                if(b2Array[0] == 0) and(b2Array[1] ==  1): 
+                    for i in range(len(pen.worldPosition)):
+                        locationTemp[i] = pen.worldPosition[i] # these values have to be set with a for loop, oterwise locationTemp becomes an updating coppy
+                    print("temp =", locationTemp)
+                    
+                
+                if(b2):
+                    for i in range(len(pen.worldPosition)):
+                        locationDifference[i] =  locationTemp[i] - pen.worldPosition[i] # checks for movement of the pen form location temp
+                        locationTemp[i] = pen.worldPosition[i] # sets a new temp to be looked at in the next frame
+                    #print(locationDifference, locationTemp,pen.worldPosition)
+                    print(locationDifference)
+                    canvase.applyMovement(locationDifference, False) # moved the entire armature in to compensate for the difference. 
+                                # overall, allows the user to pan by pressing the 2nd button and dragging
+                    
+                    
+                #pressing both buttons at the same time clears all of the added cubes
+                if(b1) and(b2):  
+                    for Object in objects: # the for loop makes sure that the code does not only eliminate one of the blocks
+                        if(Object.name == "Cube.006"):
+                            Object.endObject()
+
+            
+def serialClose(cont):      # is hooked up to a Q key sensor 
+    global shouldRun
+    if (shouldRun == 1):
+        ser.close()     # closing the serial allows for it to be opened agin the next time 
+        
+#####################################################################################################################################################
+
+        # IF FOR SOME REASON THE SERIAL PORT IS NOT CLOSED, AND ACCESS IS DENIED, UNPLUG AND RECONNECT THE ARDUINO TO ALLOW ACCESS
+        
+#####################################################################################################################################################
+        
+        print("Serial Port is closed, it is now safe to exit")  
+        shouldRun = 0
+        cont.activate("Game") ## quits the game
+        
+    else:
+        print("already closed");
+        cont.activate("Game")
+
+
+
